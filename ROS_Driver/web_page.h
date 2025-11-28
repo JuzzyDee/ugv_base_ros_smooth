@@ -378,8 +378,8 @@ const char index_html[] PROGMEM = R"rawliteral(
         </section>
         <section>
             <div class="fb-info">
-                <h2 class="h2-tt" id="deviceInfo">Feedback infomation</h2>
-                <span id="fbInfo" word-wrap="break-all">Json feedback infomation shows here.</span>
+                <h2 class="h2-tt" id="deviceInfo">Feedback information</h2>
+                <span id="fbInfo" word-wrap="break-all">Json feedback information shows here.</span>
             </div>
             <div class="fb-input-info">
                 <div class="feedb-p">
