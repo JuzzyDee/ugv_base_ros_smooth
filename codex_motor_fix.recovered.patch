@@ -1,0 +1,499 @@
+# Recovered Codex motor/cogging fix — provenance + caveat
+#
+# Source: Codex CLI session ~/.codex/sessions/2026/05/07/rollout-2026-05-07T21-58-08-...jsonl
+# Recovered 2026-05-24, after the firmware source (waveshare/ugv_base_ros) was deleted.
+#
+# CAVEAT — does NOT git-apply cleanly to this repo:
+#   These patches were authored against the now-deleted `waveshare/ugv_base_ros` tree,
+#   which held an EARLIER hand-patched ring-buffer velocity estimator. This repo
+#   (ugv_base_ros_smooth) is the simpler stock-ish base, so the context for
+#   movtion_module.h (getLeftSpeed/getRightSpeed, LeftPidControllerCompute) and a few
+#   others will not match. Treat this as the authoritative SPEC of the final working
+#   firmware and reconstruct the after-state by hand. Codex removed the ring buffer
+#   anyway, so rebuilding onto stock is conceptually clean.
+#
+# Files touched: ROS_Driver.ino, movtion_module.h, ugv_config.h, uart_ctrl.h, ugv_advance.h
+# ============================================================================
+
+lines=1732  patch_blocks=7  apply_patch_hits=2  fix_code_strings=33
+FILES TOUCHED BY PATCHES:
+  /Users/justindavis/Developer/personal/waveshare/ugv_base_ros/ROS_Driver/ROS_Driver.ino
+  /Users/justindavis/Developer/personal/waveshare/ugv_base_ros/ROS_Driver/movtion_module.h
+  /Users/justindavis/Developer/personal/waveshare/ugv_base_ros/ROS_Driver/uart_ctrl.h
+  /Users/justindavis/Developer/personal/waveshare/ugv_base_ros/ROS_Driver/ugv_advance.h
+  /Users/justindavis/Developer/personal/waveshare/ugv_base_ros/ROS_Driver/ugv_config.h
+
+
+========== PATCH BLOCK 1 ==========
+*** Begin Patch
+*** Update File: /Users/justindavis/Developer/personal/waveshare/ugv_base_ros/ROS_Driver/ROS_Driver.ino
+@@
+-  // success &= (myICM.setDMPODRrate(DMP_ODR_Reg_Quat9, 3) == ICM_20948_Stat_Ok); // Set to the maximum
++  success &= (myICM.setDMPODRrate(DMP_ODR_Reg_Quat9, 3) == ICM_20948_Stat_Ok); // Set to the maximum
+@@
+-    // if ((data.header & DMP_header_bitmap_Quat9) > 0) {
+-    //   // Scale to +/- 1
+-    //   q1 = ((double)data.Quat9.Data.Q1) / 1073741824.0; // Convert to double. Divide by 2^30
+-    //   q2 = ((double)data.Quat9.Data.Q2) / 1073741824.0; // Convert to double. Divide by 2^30
+-    //   q3 = ((double)data.Quat9.Data.Q3) / 1073741824.0; // Convert to double. Divide by 2^30
+-    //   q0 = sqrt(1.0 - ((q1 * q1) + (q2 * q2) + (q3 * q3)));
+-
+-    //   q2sqr = q2 * q2;
+-
+-    //   // roll (x-axis rotation)
+-    //   t0 = +2.0 * (q0 * q1 + q2 * q3);
+-    //   t1 = +1.0 - 2.0 * (q1 * q1 + q2sqr);
+-    //   icm_roll = atan2(t0, t1);
+-
+-    //   // pitch (y-axis rotation)
+-    //   t2 = +2.0 * (q0 * q2 - q3 * q1);
+-    //   t2 = t2 > 1.0 ? 1.0 : t2;
+-    //   t2 = t2 < -1.0 ? -1.0 : t2;
+-    //   icm_pitch = asin(t2);
+-
+-    //   // yaw (z-axis rotation)
+-    //   t3 = +2.0 * (q0 * q3 + q1 * q2);
+-    //   t4 = +1.0 - 2.0 * (q2sqr + q3 * q3);
+-    //   icm_yaw = atan2(t3, t4);
+-
+-    //   // Serial.print(F("r:"));
+-    //   // Serial.print(icm_roll, 2);
+-    //   // Serial.print(F(" p:"));
+-    //   // Serial.print(icm_pitch, 2);
+-    //   // Serial.print(F(" y:"));
+-    //   // Serial.println(icm_yaw, 2);
+-    // }
++    if ((data.header & DMP_header_bitmap_Quat9) > 0) {
++      // Scale to +/- 1
++      q1 = ((double)data.Quat9.Data.Q1) / 1073741824.0; // Convert to double. Divide by 2^30
++      q2 = ((double)data.Quat9.Data.Q2) / 1073741824.0; // Convert to double. Divide by 2^30
++      q3 = ((double)data.Quat9.Data.Q3) / 1073741824.0; // Convert to double. Divide by 2^30
++      q0 = sqrt(1.0 - ((q1 * q1) + (q2 * q2) + (q3 * q3)));
++
++      q2sqr = q2 * q2;
++
++      // roll (x-axis rotation)
++      t0 = +2.0 * (q0 * q1 + q2 * q3);
++      t1 = +1.0 - 2.0 * (q1 * q1 + q2sqr);
++      icm_roll = atan2(t0, t1);
++
++      // pitch (y-axis rotation)
++      t2 = +2.0 * (q0 * q2 - q3 * q1);
++      t2 = t2 > 1.0 ? 1.0 : t2;
++      t2 = t2 < -1.0 ? -1.0 : t2;
++      icm_pitch = asin(t2);
++
++      // yaw (z-axis rotation)
++      t3 = +2.0 * (q0 * q3 + q1 * q2);
++      t4 = +1.0 - 2.0 * (q2sqr + q3 * q3);
++      icm_yaw = atan2(t3, t4);
++    }
+*** End Patch
+
+
+========== PATCH BLOCK 2 ==========
+*** Begin Patch
+*** Update File: /Users/justindavis/Developer/personal/waveshare/ugv_base_ros/ROS_Driver/movtion_module.h
+@@
+ static unsigned long lastTime = 0;
++static unsigned long lastLeftSpdTime = 0;
++static unsigned long lastRightSpdTime = 0;
++long lastEncoderA = 0;
++long lastEncoderB = 0;
+ 
+ double speedGetA;
+ double speedGetB;
+ 
+-// Adaptive-window velocity estimation. The previous approach computed
+-// speed from delta_pulses / delta_time over a single main-loop tick.
+-// At low commanded speeds delta_pulses is 0, 1, or 2 — so quantisation
+-// noise was ±50-100%, and PID with Ki=2000 reacted to apparent speed
+-// swings by slamming PWM up and down (audible cogging, asymmetric
+-// stalling, ~35% of samples both wheels stopped on the bench at 0.1 m/s).
+-//
+-// Instead, maintain a rolling buffer of (count, time) samples and walk
+-// back through it to find the oldest sample where pulses-since-then
+-// is at least MIN_PULSES_FOR_VEL. Compute velocity over that window.
+-// At high speeds the window is 1 sample (low latency). At low speeds
+-// the window extends back until enough pulses accumulate (low quantisation
+-// noise). At zero speed it returns 0 cleanly.
+-const int VEL_BUFFER_SIZE = 20;     // ~1 second of history at 20Hz main loop
+-const int MIN_PULSES_FOR_VEL = 3;   // Minimum pulses required for velocity
+-const unsigned long MIN_TIME_FOR_VEL = 10000; // 10ms minimum window — prevents
+-                                              // divide-by-tiny-time when the
+-                                              // cooperative main loop runs sub-ms
+-
+-struct EncoderSample {
+-  long count;
+-  unsigned long time;
+-};
+-
+-EncoderSample bufferA[VEL_BUFFER_SIZE];
+-EncoderSample bufferB[VEL_BUFFER_SIZE];
+-int bufA_idx = 0, bufB_idx = 0;     // Next write position
+-int bufA_count = 0, bufB_count = 0; // Number of valid entries (caps at SIZE)
+-
+-// EMA filter retained downstream of the windowed estimate for any
+-// residual smoothing. With the window already integrating over multiple
+-// pulses, alpha can be higher (less smoothing) than the previous 0.3
+-// without re-introducing the cogging — but leaving it at 0.3 for now
+-// to keep this flash to a single isolated change.
++// Sample encoder velocity over a fixed interval and hold the last estimate
++// between samples. Measuring every cooperative-loop tick makes the denominator
++// tiny and pulse quantisation dominates; returning zero until a pulse threshold
++// is reached makes the high-I PID over-ramp. A 50 ms sample gives about
++// 13 pulses at 0.1 m/s on the UGV Rover, which is enough to damp cogging
++// without adding much control latency.
++const unsigned long SPEED_SAMPLE_INTERVAL_US = 50000;
+ const double SPEED_FILTER_ALPHA = 0.3;
+ double speedFilteredA = 0;
+ double speedFilteredB = 0;
+@@
+ void initEncoders() {
+   encoderA.attachHalfQuad(AENCA, AENCB);
+   encoderB.attachHalfQuad(BENCA, BENCB);
+   encoderA.setCount(0);
+   encoderB.setCount(0);
++  unsigned long currentTime = micros();
++  lastEncoderA = encoderA.getCount();
++  lastEncoderB = encoderB.getCount();
++  lastLeftSpdTime = currentTime;
++  lastRightSpdTime = currentTime;
++  speedGetA = 0;
++  speedGetB = 0;
++  speedFilteredA = 0;
++  speedFilteredB = 0;
++}
++
++void resetLeftSpeedEstimate() {
++  lastEncoderA = encoderA.getCount();
++  lastLeftSpdTime = micros();
++  speedGetA = 0;
++  speedFilteredA = 0;
++}
++
++void resetRightSpeedEstimate() {
++  lastEncoderB = encoderB.getCount();
++  lastRightSpdTime = micros();
++  speedGetB = 0;
++  speedFilteredB = 0;
+ }
+ 
+ void getLeftSpeed() {
+   unsigned long currentTime = micros();
+   long encoderPulsesA = encoderA.getCount();
+-
+-  // Walk back through buffer to find oldest sample with enough pulse delta
+-  long pulseDelta = 0;
+-  unsigned long timeDelta = 0;
+-  bool found = false;
+-
+-  for (int i = 1; i <= bufA_count; i++) {
+-    int probeIdx = (bufA_idx - i + VEL_BUFFER_SIZE) % VEL_BUFFER_SIZE;
+-    long delta;
+-    if (!SET_MOTOR_DIR) {
+-      delta = encoderPulsesA - bufferA[probeIdx].count;
+-    } else {
+-      delta = bufferA[probeIdx].count - encoderPulsesA;
+-    }
+-    unsigned long tDelta = currentTime - bufferA[probeIdx].time;
+-    if (abs(delta) >= MIN_PULSES_FOR_VEL && tDelta >= MIN_TIME_FOR_VEL) {
+-      pulseDelta = delta;
+-      timeDelta = tDelta;
+-      found = true;
+-      break;
+-    }
+-  }
+-
+-  if (found && timeDelta > 0) {
+-    speedGetA = (plusesRate * pulseDelta) / ((double)timeDelta / 1000000);
+-  } else {
+-    speedGetA = 0.0;  // Insufficient motion to measure reliably
+-  }
+ 
+   // Odometry from absolute count (unchanged behaviour)
+   if (!SET_MOTOR_DIR) {
+     en_odom_l = ((float)encoderPulsesA / ONE_CIRCLE_PLUSES) * WHEEL_D * 3.14159265359;
+   } else {
+     en_odom_l = - ((float)encoderPulsesA / ONE_CIRCLE_PLUSES) * WHEEL_D * 3.14159265359;
+   }
+ 
+-  // Push current sample into ring buffer
+-  bufferA[bufA_idx].count = encoderPulsesA;
+-  bufferA[bufA_idx].time = currentTime;
+-  bufA_idx = (bufA_idx + 1) % VEL_BUFFER_SIZE;
+-  if (bufA_count < VEL_BUFFER_SIZE) bufA_count++;
++  unsigned long elapsed = currentTime - lastLeftSpdTime;
++  if (elapsed < SPEED_SAMPLE_INTERVAL_US) {
++    return;
++  }
++
++  long pulseDelta;
++  if (!SET_MOTOR_DIR) {
++    pulseDelta = encoderPulsesA - lastEncoderA;
++  } else {
++    pulseDelta = lastEncoderA - encoderPulsesA;
++  }
++
++  speedGetA = (plusesRate * pulseDelta) / ((double)elapsed / 1000000);
++  lastEncoderA = encoderPulsesA;
++  lastLeftSpdTime = currentTime;
+ 
+   speedFilteredA = SPEED_FILTER_ALPHA * speedGetA + (1.0 - SPEED_FILTER_ALPHA) * speedFilteredA;
+ }
+ 
+ void getRightSpeed() {
+   unsigned long currentTime = micros();
+   long encoderPulsesB = encoderB.getCount();
+-
+-  // Walk back through buffer to find oldest sample with enough pulse delta
+-  long pulseDelta = 0;
+-  unsigned long timeDelta = 0;
+-  bool found = false;
+-
+-  for (int i = 1; i <= bufB_count; i++) {
+-    int probeIdx = (bufB_idx - i + VEL_BUFFER_SIZE) % VEL_BUFFER_SIZE;
+-    long delta;
+-    if (!SET_MOTOR_DIR) {
+-      delta = encoderPulsesB - bufferB[probeIdx].count;
+-    } else {
+-      delta = bufferB[probeIdx].count - encoderPulsesB;
+-    }
+-    unsigned long tDelta = currentTime - bufferB[probeIdx].time;
+-    if (abs(delta) >= MIN_PULSES_FOR_VEL && tDelta >= MIN_TIME_FOR_VEL) {
+-      pulseDelta = delta;
+-      timeDelta = tDelta;
+-      found = true;
+-      break;
+-    }
+-  }
+-
+-  if (found && timeDelta > 0) {
+-    speedGetB = (plusesRate * pulseDelta) / ((double)timeDelta / 1000000);
+-  } else {
+-    speedGetB = 0.0;  // Insufficient motion to measure reliably
+-  }
+ 
+   // Odometry from absolute count (unchanged behaviour)
+   if (!SET_MOTOR_DIR) {
+     en_odom_r = ((float)encoderPulsesB / ONE_CIRCLE_PLUSES) * WHEEL_D * 3.14159265359;
+   } else {
+     en_odom_r = - ((float)encoderPulsesB / ONE_CIRCLE_PLUSES) * WHEEL_D * 3.14159265359;
+   }
+ 
+-  // Push current sample into ring buffer
+-  bufferB[bufB_idx].count = encoderPulsesB;
+-  bufferB[bufB_idx].time = currentTime;
+-  bufB_idx = (bufB_idx + 1) % VEL_BUFFER_SIZE;
+-  if (bufB_count < VEL_BUFFER_SIZE) bufB_count++;
++  unsigned long elapsed = currentTime - lastRightSpdTime;
++  if (elapsed < SPEED_SAMPLE_INTERVAL_US) {
++    return;
++  }
++
++  long pulseDelta;
++  if (!SET_MOTOR_DIR) {
++    pulseDelta = encoderPulsesB - lastEncoderB;
++  } else {
++    pulseDelta = lastEncoderB - encoderPulsesB;
++  }
++
++  speedGetB = (plusesRate * pulseDelta) / ((double)elapsed / 1000000);
++  lastEncoderB = encoderPulsesB;
++  lastRightSpdTime = currentTime;
+ 
+   speedFilteredB = SPEED_FILTER_ALPHA * speedGetB + (1.0 - SPEED_FILTER_ALPHA) * speedFilteredB;
+ }
+@@
+ void setGoalSpeed(float inputLeft, float inputRight) {
+   usePIDCompute = true;
+@@
+-  setpointA = inputLeft*spd_rate_A;
+-  setpointB = inputRight*spd_rate_B;
++  double nextSetpointA = inputLeft*spd_rate_A;
++  double nextSetpointB = inputRight*spd_rate_B;
++
++  if (nextSetpointA == 0 || (setpointA < 0 && nextSetpointA > 0) || (setpointA > 0 && nextSetpointA < 0)) {
++    resetLeftSpeedEstimate();
++  }
++  if (nextSetpointB == 0 || (setpointB < 0 && nextSetpointB > 0) || (setpointB > 0 && nextSetpointB < 0)) {
++    resetRightSpeedEstimate();
++  }
++
++  setpointA = nextSetpointA;
++  setpointB = nextSetpointB;
+*** End Patch
+
+
+========== PATCH BLOCK 3 ==========
+*** Begin Patch
+*** Update File: /Users/justindavis/Developer/personal/waveshare/ugv_base_ros/ROS_Driver/ugv_config.h
+@@
+-float __ki = 2000.0;
++float __ki = 120.0;
+ float __kd = 0;
+ float windup_limits = 255;
+@@
+ #define THRESHOLD_PWM 23
++
++const double MOTOR_MIN_FEEDFORWARD_PWM = 34.0;
++const double MOTOR_SPEED_FEEDFORWARD_PWM = 60.0;
+*** End Patch
+
+
+========== PATCH BLOCK 4 ==========
+*** Begin Patch
+*** Update File: /Users/justindavis/Developer/personal/waveshare/ugv_base_ros/ROS_Driver/movtion_module.h
+@@
+ void pidControllerInit() {
+   pidA.Start(speedGetA,
+              outputA,
+              setpointA);
+   pidA.SetOutputLimits(-255, 255);
++  pidA.SetSampleTime(50);
+   pidA.SetMode(PID::Automatic);
+ 
+   pidB.Start(speedGetB,
+              outputB,
+              setpointB);
+   pidB.SetOutputLimits(-255, 255);
++  pidB.SetSampleTime(50);
+   pidB.SetMode(PID::Automatic);
+ }
+@@
+ void rightCtrl(float pwmInputB){
+@@
+   }
+ }
+ 
++double motorFeedForward(double setpoint) {
++  if (setpoint == 0) {
++    return 0;
++  }
++
++  double direction = setpoint > 0 ? 1.0 : -1.0;
++  double magnitude = MOTOR_MIN_FEEDFORWARD_PWM + (abs(setpoint) * MOTOR_SPEED_FEEDFORWARD_PWM);
++  return direction * magnitude;
++}
++
++double clampMotorOutput(double output) {
++  if (output > 255) {
++    return 255;
++  }
++  if (output < -255) {
++    return -255;
++  }
++  return output;
++}
++
+ void setGoalSpeed(float inputLeft, float inputRight) {
+   usePIDCompute = true;
+@@
+ void LeftPidControllerCompute() {
+   if (!usePIDCompute) {
+     return;
+   }
+ 
+-  outputA = pidA.Run(speedFilteredA);
+-  if (abs(outputA)<THRESHOLD_PWM) {
+-    outputA = 0;
+-  }
+-  if (setpointA == 0 && speedGetA == 0) {
++  double pidOutput = pidA.Run(speedFilteredA);
++  if (setpointA == 0) {
+     outputA = 0;
++  } else {
++    outputA = clampMotorOutput(motorFeedForward(setpointA) + pidOutput);
+   }
+   leftCtrl(outputA);
+ }
+@@
+-  outputB = pidB.Run(speedFilteredB);
+-  if (abs(outputB)<THRESHOLD_PWM) {
+-    outputB = 0;
+-  }
+-  if (setpointB == 0 && speedGetB == 0) {
++  double pidOutput = pidB.Run(speedFilteredB);
++  if (setpointB == 0) {
+     outputB = 0;
++  } else {
++    outputB = clampMotorOutput(motorFeedForward(setpointB) + pidOutput);
+   }
+   rightCtrl(outputB);
+ }
+*** End Patch
+
+
+========== PATCH BLOCK 5 ==========
+*** Begin Patch
+*** Update File: /Users/justindavis/Developer/personal/waveshare/ugv_base_ros/ROS_Driver/uart_ctrl.h
+@@
+-	case CMD_ROS_CTRL:		rosCtrl(
++	case CMD_ROS_CTRL:		heartbeatStopFlag = false;
++												lastCmdRecvTime = millis();
++												rosCtrl(
+ 												jsonCmdReceive["X"],
+ 												jsonCmdReceive["Z"]);break;
+*** End Patch
+
+
+========== PATCH BLOCK 6 ==========
+*** Begin Patch
+*** Update File: /Users/justindavis/Developer/personal/waveshare/ugv_base_ros/ROS_Driver/ROS_Driver.ino
+@@
+ void loop() {
+   icm_20948_DMP_data_t data;
+   myICM.readDMPdataFromFIFO(&data);
++  bool dmpAccelUpdated = false;
+ 
+   if ((myICM.status == ICM_20948_Stat_Ok) || (myICM.status == ICM_20948_Stat_FIFOMoreDataAvail)) {
+@@
+     if ((data.header & DMP_header_bitmap_Accel) > 0) {
+       ax = data.Raw_Accel.Data.X;
+       ay = data.Raw_Accel.Data.Y;
+       az = data.Raw_Accel.Data.Z;
++      dmpAccelUpdated = true;
+     }
+@@
+       mz = data.Compass.Data.Z;
+     }
+   }
++
++  if (!dmpAccelUpdated) {
++    myICM.getAGMT();
++    if (myICM.status == ICM_20948_Stat_Ok) {
++      ax = (double)myICM.accX() * 8192.0 / 1000.0;
++      ay = (double)myICM.accY() * 8192.0 / 1000.0;
++      az = (double)myICM.accZ() * 8192.0 / 1000.0;
++    }
++  }
+ 
+   serialCtrl();
+*** End Patch
+
+
+========== PATCH BLOCK 7 ==========
+*** Begin Patch
+*** Update File: /Users/justindavis/Developer/personal/waveshare/ugv_base_ros/ROS_Driver/ugv_advance.h
+@@
+-	// jsonInfoHttp["q0"] = q0;
+-	// jsonInfoHttp["q1"] = q1;
+-	// jsonInfoHttp["q2"] = q2;
+-	// jsonInfoHttp["q3"] = q3;
++	jsonInfoHttp["q0"] = q0;
++	jsonInfoHttp["q1"] = q1;
++	jsonInfoHttp["q2"] = q2;
++	jsonInfoHttp["q3"] = q3;
+@@
+ 	switch(moduleType) {
+ 	case 1:
+-		jsonInfoHttp["ax"] = lastX;
+-		jsonInfoHttp["ay"] = lastY;
+-		jsonInfoHttp["az"] = lastZ;
++		jsonInfoHttp["armX"] = lastX;
++		jsonInfoHttp["armY"] = lastY;
++		jsonInfoHttp["armZ"] = lastZ;
+ 		jsonInfoHttp["ab"] = radB;
+ 		jsonInfoHttp["as"] = radS;
+ 		jsonInfoHttp["ae"] = radE;
+*** End Patch
