@@ -390,10 +390,10 @@ void baseInfoFeedback() {
 	// jsonInfoHttp["p"] = icm_pitch;
 	// jsonInfoHttp["y"] = icm_yaw;
 
-	// jsonInfoHttp["q0"] = q0;
-	// jsonInfoHttp["q1"] = q1;
-	// jsonInfoHttp["q2"] = q2;
-	// jsonInfoHttp["q3"] = q3;
+	jsonInfoHttp["q0"] = q0;
+	jsonInfoHttp["q1"] = q1;
+	jsonInfoHttp["q2"] = q2;
+	jsonInfoHttp["q3"] = q3;
 
 	jsonInfoHttp["ax"] = ax;
 	jsonInfoHttp["ay"] = ay;
@@ -418,9 +418,9 @@ void baseInfoFeedback() {
 
 	switch(moduleType) {
 	case 1:
-		jsonInfoHttp["ax"] = lastX;
-		jsonInfoHttp["ay"] = lastY;
-		jsonInfoHttp["az"] = lastZ;
+		jsonInfoHttp["armX"] = lastX;
+		jsonInfoHttp["armY"] = lastY;
+		jsonInfoHttp["armZ"] = lastZ;
 		jsonInfoHttp["ab"] = radB;
 		jsonInfoHttp["as"] = radS;
 		jsonInfoHttp["ae"] = radE;
