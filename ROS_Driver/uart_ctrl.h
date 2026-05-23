@@ -24,7 +24,9 @@ void jsonCmdReceiveHandler(){
 												leftCtrl(jsonCmdReceive["L"]);
 												rightCtrl(jsonCmdReceive["R"]);
 												break;
-	case CMD_ROS_CTRL:		rosCtrl(
+	case CMD_ROS_CTRL:		heartbeatStopFlag = false;
+												lastCmdRecvTime = millis();
+												rosCtrl(
 												jsonCmdReceive["X"],
 												jsonCmdReceive["Z"]);break;
 	case CMD_SET_MOTOR_PID:

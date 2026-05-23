@@ -132,7 +132,7 @@ void setup() {
   // Value = (DMP running rate / ODR ) - 1
   // E.g. For a 5Hz ODR rate when DMP is running at 55Hz, value = (55/5) - 1 = 10.
 
-  // success &= (myICM.setDMPODRrate(DMP_ODR_Reg_Quat9, 3) == ICM_20948_Stat_Ok); // Set to the maximum
+  success &= (myICM.setDMPODRrate(DMP_ODR_Reg_Quat9, 3) == ICM_20948_Stat_Ok); // Set to the maximum
 
   success &= (myICM.setDMPODRrate(DMP_ODR_Reg_Accel, 3) == ICM_20948_Stat_Ok); // Set to the maximum
   success &= (myICM.setDMPODRrate(DMP_ODR_Reg_Gyro, 3) == ICM_20948_Stat_Ok); // Set to the maximum
@@ -293,45 +293,40 @@ void setup() {
 void loop() {
   icm_20948_DMP_data_t data;
   myICM.readDMPdataFromFIFO(&data);
+  bool dmpAccelUpdated = false;
 
   if ((myICM.status == ICM_20948_Stat_Ok) || (myICM.status == ICM_20948_Stat_FIFOMoreDataAvail)) {
-    // if ((data.header & DMP_header_bitmap_Quat9) > 0) {
-    //   // Scale to +/- 1
-    //   q1 = ((double)data.Quat9.Data.Q1) / 1073741824.0; // Convert to double. Divide by 2^30
-    //   q2 = ((double)data.Quat9.Data.Q2) / 1073741824.0; // Convert to double. Divide by 2^30
-    //   q3 = ((double)data.Quat9.Data.Q3) / 1073741824.0; // Convert to double. Divide by 2^30
-    //   q0 = sqrt(1.0 - ((q1 * q1) + (q2 * q2) + (q3 * q3)));
+    if ((data.header & DMP_header_bitmap_Quat9) > 0) {
+      // Scale to +/- 1
+      q1 = ((double)data.Quat9.Data.Q1) / 1073741824.0; // Convert to double. Divide by 2^30
+      q2 = ((double)data.Quat9.Data.Q2) / 1073741824.0; // Convert to double. Divide by 2^30
+      q3 = ((double)data.Quat9.Data.Q3) / 1073741824.0; // Convert to double. Divide by 2^30
+      q0 = sqrt(1.0 - ((q1 * q1) + (q2 * q2) + (q3 * q3)));
 
-    //   q2sqr = q2 * q2;
+      q2sqr = q2 * q2;
 
-    //   // roll (x-axis rotation)
-    //   t0 = +2.0 * (q0 * q1 + q2 * q3);
-    //   t1 = +1.0 - 2.0 * (q1 * q1 + q2sqr);
-    //   icm_roll = atan2(t0, t1);
+      // roll (x-axis rotation)
+      t0 = +2.0 * (q0 * q1 + q2 * q3);
+      t1 = +1.0 - 2.0 * (q1 * q1 + q2sqr);
+      icm_roll = atan2(t0, t1);
 
-    //   // pitch (y-axis rotation)
-    //   t2 = +2.0 * (q0 * q2 - q3 * q1);
-    //   t2 = t2 > 1.0 ? 1.0 : t2;
-    //   t2 = t2 < -1.0 ? -1.0 : t2;
-    //   icm_pitch = asin(t2);
+      // pitch (y-axis rotation)
+      t2 = +2.0 * (q0 * q2 - q3 * q1);
+      t2 = t2 > 1.0 ? 1.0 : t2;
+      t2 = t2 < -1.0 ? -1.0 : t2;
+      icm_pitch = asin(t2);
 
-    //   // yaw (z-axis rotation)
-    //   t3 = +2.0 * (q0 * q3 + q1 * q2);
-    //   t4 = +1.0 - 2.0 * (q2sqr + q3 * q3);
-    //   icm_yaw = atan2(t3, t4);
-
-    //   // Serial.print(F("r:"));
-    //   // Serial.print(icm_roll, 2);
-    //   // Serial.print(F(" p:"));
-    //   // Serial.print(icm_pitch, 2);
-    //   // Serial.print(F(" y:"));
-    //   // Serial.println(icm_yaw, 2);
-    // }
+      // yaw (z-axis rotation)
+      t3 = +2.0 * (q0 * q3 + q1 * q2);
+      t4 = +1.0 - 2.0 * (q2sqr + q3 * q3);
+      icm_yaw = atan2(t3, t4);
+    }
 
     if ((data.header & DMP_header_bitmap_Accel) > 0) {
       ax = data.Raw_Accel.Data.X;
       ay = data.Raw_Accel.Data.Y;
       az = data.Raw_Accel.Data.Z;
+      dmpAccelUpdated = true;
     }
     if ((data.header & DMP_header_bitmap_Gyro) > 0) {
       gx = data.Raw_Gyro.Data.X;
@@ -342,6 +337,15 @@ void loop() {
       mx = data.Compass.Data.X;
       my = data.Compass.Data.Y;
       mz = data.Compass.Data.Z;
+    }
+  }
+
+  if (!dmpAccelUpdated) {
+    myICM.getAGMT();
+    if (myICM.status == ICM_20948_Stat_Ok) {
+      ax = (double)myICM.accX() * 8192.0 / 1000.0;
+      ay = (double)myICM.accY() * 8192.0 / 1000.0;
+      az = (double)myICM.accZ() * 8192.0 / 1000.0;
     }
   }
 

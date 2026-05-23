@@ -126,11 +126,22 @@ ESP32Encoder encoderB;
 static unsigned long lastTime = 0;
 static unsigned long lastLeftSpdTime = 0;
 static unsigned long lastRightSpdTime = 0;
-int lastEncoderA = 0;
-int lastEncoderB = 0;
+long lastEncoderA = 0;
+long lastEncoderB = 0;
 
 double speedGetA;
 double speedGetB;
+
+// Sample encoder velocity over a fixed interval and hold the last estimate
+// between samples. Measuring every cooperative-loop tick makes the denominator
+// tiny and pulse quantisation dominates; returning zero until a pulse threshold
+// is reached makes the high-I PID over-ramp. A 50 ms sample gives about
+// 13 pulses at 0.1 m/s on the UGV Rover, which is enough to damp cogging
+// without adding much control latency.
+const unsigned long SPEED_SAMPLE_INTERVAL_US = 50000;
+const double SPEED_FILTER_ALPHA = 0.3;
+double speedFilteredA = 0;
+double speedFilteredB = 0;
 
 double plusesRate = 3.14159265359 * WHEEL_D / ONE_CIRCLE_PLUSES;
 
@@ -140,34 +151,89 @@ void initEncoders() {
   encoderB.attachHalfQuad(BENCA, BENCB);
   encoderA.setCount(0);
   encoderB.setCount(0);
+  unsigned long currentTime = micros();
+  lastEncoderA = encoderA.getCount();
+  lastEncoderB = encoderB.getCount();
+  lastLeftSpdTime = currentTime;
+  lastRightSpdTime = currentTime;
+  speedGetA = 0;
+  speedGetB = 0;
+  speedFilteredA = 0;
+  speedFilteredB = 0;
+}
+
+void resetLeftSpeedEstimate() {
+  lastEncoderA = encoderA.getCount();
+  lastLeftSpdTime = micros();
+  speedGetA = 0;
+  speedFilteredA = 0;
+}
+
+void resetRightSpeedEstimate() {
+  lastEncoderB = encoderB.getCount();
+  lastRightSpdTime = micros();
+  speedGetB = 0;
+  speedFilteredB = 0;
 }
 
 void getLeftSpeed() {
   unsigned long currentTime = micros();
   long encoderPulsesA = encoderA.getCount();
+
+  // Odometry from absolute count (unchanged behaviour)
   if (!SET_MOTOR_DIR) {
-    speedGetA = (plusesRate * (encoderPulsesA - lastEncoderA)) / ((double)(currentTime - lastLeftSpdTime) / 1000000);
     en_odom_l = ((float)encoderPulsesA / ONE_CIRCLE_PLUSES) * WHEEL_D * 3.14159265359;
   } else {
-    speedGetA = (plusesRate * (lastEncoderA - encoderPulsesA)) / ((double)(currentTime - lastLeftSpdTime) / 1000000);
     en_odom_l = - ((float)encoderPulsesA / ONE_CIRCLE_PLUSES) * WHEEL_D * 3.14159265359;
   }
+
+  unsigned long elapsed = currentTime - lastLeftSpdTime;
+  if (elapsed < SPEED_SAMPLE_INTERVAL_US) {
+    return;
+  }
+
+  long pulseDelta;
+  if (!SET_MOTOR_DIR) {
+    pulseDelta = encoderPulsesA - lastEncoderA;
+  } else {
+    pulseDelta = lastEncoderA - encoderPulsesA;
+  }
+
+  speedGetA = (plusesRate * pulseDelta) / ((double)elapsed / 1000000);
   lastEncoderA = encoderPulsesA;
   lastLeftSpdTime = currentTime;
+
+  speedFilteredA = SPEED_FILTER_ALPHA * speedGetA + (1.0 - SPEED_FILTER_ALPHA) * speedFilteredA;
 }
 
 void getRightSpeed() {
   unsigned long currentTime = micros();
   long encoderPulsesB = encoderB.getCount();
+
+  // Odometry from absolute count (unchanged behaviour)
   if (!SET_MOTOR_DIR) {
-    speedGetB = (plusesRate * (encoderPulsesB - lastEncoderB)) / ((double)(currentTime - lastRightSpdTime) / 1000000);
     en_odom_r = ((float)encoderPulsesB / ONE_CIRCLE_PLUSES) * WHEEL_D * 3.14159265359;
   } else {
-    speedGetB = (plusesRate * (lastEncoderB - encoderPulsesB)) / ((double)(currentTime - lastRightSpdTime) / 1000000);
     en_odom_r = - ((float)encoderPulsesB / ONE_CIRCLE_PLUSES) * WHEEL_D * 3.14159265359;
   }
+
+  unsigned long elapsed = currentTime - lastRightSpdTime;
+  if (elapsed < SPEED_SAMPLE_INTERVAL_US) {
+    return;
+  }
+
+  long pulseDelta;
+  if (!SET_MOTOR_DIR) {
+    pulseDelta = encoderPulsesB - lastEncoderB;
+  } else {
+    pulseDelta = lastEncoderB - encoderPulsesB;
+  }
+
+  speedGetB = (plusesRate * pulseDelta) / ((double)elapsed / 1000000);
   lastEncoderB = encoderPulsesB;
   lastRightSpdTime = currentTime;
+
+  speedFilteredB = SPEED_FILTER_ALPHA * speedGetB + (1.0 - SPEED_FILTER_ALPHA) * speedFilteredB;
 }
 
 
@@ -197,12 +263,14 @@ void pidControllerInit() {
              outputA,
              setpointA);
   pidA.SetOutputLimits(-255, 255);
+  pidA.SetSampleTime(50);
   pidA.SetMode(PID::Automatic);
 
   pidB.Start(speedGetB,
              outputB,
              setpointB);
   pidB.SetOutputLimits(-255, 255);
+  pidB.SetSampleTime(50);
   pidB.SetMode(PID::Automatic);
 }
 
@@ -260,6 +328,26 @@ void rightCtrl(float pwmInputB){
   }
 }
 
+double motorFeedForward(double setpoint) {
+  if (setpoint == 0) {
+    return 0;
+  }
+
+  double direction = setpoint > 0 ? 1.0 : -1.0;
+  double magnitude = MOTOR_MIN_FEEDFORWARD_PWM + (abs(setpoint) * MOTOR_SPEED_FEEDFORWARD_PWM);
+  return direction * magnitude;
+}
+
+double clampMotorOutput(double output) {
+  if (output > 255) {
+    return 255;
+  }
+  if (output < -255) {
+    return -255;
+  }
+  return output;
+}
+
 void setGoalSpeed(float inputLeft, float inputRight) {
   usePIDCompute = true;
 
@@ -271,8 +359,18 @@ void setGoalSpeed(float inputLeft, float inputRight) {
     return;
   }
   
-  setpointA = inputLeft*spd_rate_A;
-  setpointB = inputRight*spd_rate_B;
+  double nextSetpointA = inputLeft*spd_rate_A;
+  double nextSetpointB = inputRight*spd_rate_B;
+
+  if (nextSetpointA == 0 || (setpointA < 0 && nextSetpointA > 0) || (setpointA > 0 && nextSetpointA < 0)) {
+    resetLeftSpeedEstimate();
+  }
+  if (nextSetpointB == 0 || (setpointB < 0 && nextSetpointB > 0) || (setpointB > 0 && nextSetpointB < 0)) {
+    resetRightSpeedEstimate();
+  }
+
+  setpointA = nextSetpointA;
+  setpointB = nextSetpointB;
 
   if (setpointA != setpointA_buffer) {
     pidA.Setpoint(setpointA);
@@ -290,12 +388,11 @@ void LeftPidControllerCompute() {
     return;
   }
 
-  outputA = pidA.Run(speedGetA);
-  if (abs(outputA)<THRESHOLD_PWM) {
+  double pidOutput = pidA.Run(speedFilteredA);
+  if (setpointA == 0) {
     outputA = 0;
-  }
-  if (setpointA == 0 && speedGetA == 0) {
-    outputA = 0;
+  } else {
+    outputA = clampMotorOutput(motorFeedForward(setpointA) + pidOutput);
   }
   leftCtrl(outputA);
 }
@@ -305,12 +402,11 @@ void RightPidControllerCompute() {
     return;
   }
 
-  outputB = pidB.Run(speedGetB);
-  if (abs(outputB)<THRESHOLD_PWM) {
+  double pidOutput = pidB.Run(speedFilteredB);
+  if (setpointB == 0) {
     outputB = 0;
-  }
-  if (setpointB == 0 && speedGetB == 0) {
-    outputB = 0;
+  } else {
+    outputB = clampMotorOutput(motorFeedForward(setpointB) + pidOutput);
   }
   rightCtrl(outputB);
 }
