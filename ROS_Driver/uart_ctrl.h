@@ -24,9 +24,17 @@ void jsonCmdReceiveHandler(){
 												leftCtrl(jsonCmdReceive["L"]);
 												rightCtrl(jsonCmdReceive["R"]);
 												break;
-	case CMD_ROS_CTRL:		rosCtrl(
+	case CMD_ROS_CTRL:		if (jsonCmdReceive.containsKey("X") &&
+												jsonCmdReceive.containsKey("Z")){
+												if (jsonCmdReceive["X"].is<float>() &&
+												jsonCmdReceive["Z"].is<float>()){
+												heartbeatStopFlag = false;
+												lastCmdRecvTime = millis();
+												rosCtrl(
 												jsonCmdReceive["X"],
-												jsonCmdReceive["Z"]);break;
+												jsonCmdReceive["Z"]);
+												}
+												} break;
 	case CMD_SET_MOTOR_PID:
 												setPID(
 												jsonCmdReceive["P"],

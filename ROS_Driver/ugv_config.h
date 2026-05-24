@@ -313,7 +313,7 @@ String jsonFeedbackWeb = "";
 //  --- --- --- pid controller --- --- ---
 
 float __kp = 20.0;
-float __ki = 2000.0;
+float __ki = 120.0;
 float __kd = 0;
 float windup_limits = 255;
 
@@ -321,6 +321,9 @@ float windup_limits = 255;
 //  --- --- --- ugv base --- --- ---
 
 #define THRESHOLD_PWM 23
+
+const double MOTOR_MIN_FEEDFORWARD_PWM = 34.0;
+const double MOTOR_SPEED_FEEDFORWARD_PWM = 60.0;
 
 // mainType:01 RaspRover
 // #define WHEEL_D 0.0800
